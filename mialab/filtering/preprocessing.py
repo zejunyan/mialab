@@ -28,8 +28,11 @@ class ImageNormalization(pymia_fltr.Filter):
 
         img_arr = sitk.GetArrayFromImage(image)
 
-        # todo: normalize the image using numpy
-        warnings.warn('No normalization implemented. Returning unprocessed image.')
+        # todo - done: normalize the image using numpy
+
+        max_val, min_val = img_arr.max(), img_arr.min()
+        # normalize to [0,1]
+        rescaled_np_img = (img_arr - min_val) * (1 / max_val)
 
         img_out = sitk.GetImageFromArray(img_arr)
         img_out.CopyInformation(image)
@@ -77,8 +80,10 @@ class SkullStripping(pymia_fltr.Filter):
         """
         mask = params.img_mask  # the brain mask
 
-        # todo: remove the skull from the image by using the brain mask
-        warnings.warn('No skull-stripping implemented. Returning unprocessed image.')
+        # todo - done: remove the skull from the image by using the brain mask
+         # Convert mask to sitkUInt8 to avoid the warning
+        mask_uint8 = sitk.Cast(mask, sitk.sitkUInt8)
+        image = sitk.Mask(image, mask_uint8)
 
         return image
 
@@ -126,19 +131,22 @@ class ImageRegistration(pymia_fltr.Filter):
             sitk.Image: The registered image.
         """
 
-        # todo: replace this filter by a registration. Registration can be costly, therefore, we provide you the
+        # todo - done: replace this filter by a registration. Registration can be costly, therefore, we provide you the
         # transformation, which you only need to apply to the image!
-        warnings.warn('No registration implemented. Returning unregistered image')
-
         atlas = params.atlas
         transform = params.transformation
         is_ground_truth = params.is_ground_truth  # the ground truth will be handled slightly different
+        
+        result = sitk.Resample(image,
+                               referenceImage = atlas,
+                               transform=transform,
+                               interpolator=sitk.sitkNearestNeighbor)
 
         # note: if you are interested in registration, and want to test it, have a look at
         # pymia.filtering.registration.MultiModalRegistration. Think about the type of registration, i.e.
         # do you want to register to an atlas or inter-subject? Or just ask us, we can guide you ;-)
 
-        return image
+        return result
 
     def __str__(self):
         """Gets a printable string representation.
