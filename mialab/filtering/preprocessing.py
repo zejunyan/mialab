@@ -140,7 +140,7 @@ class ImageRegistration(pymia_fltr.Filter):
         result = sitk.Resample(image,
                                referenceImage = atlas,
                                transform=transform,
-                               interpolator=sitk.sitkNearestNeighbor)
+                               interpolator=sitk.sitkNearestNeighbor if is_ground_truth else sitk.sitkLinear)
 
         # note: if you are interested in registration, and want to test it, have a look at
         # pymia.filtering.registration.MultiModalRegistration. Think about the type of registration, i.e.
