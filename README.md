@@ -27,3 +27,33 @@ Enjoy!
 ----
 
 Found a bug or do you have suggestions? Open an issue or better submit a pull request.
+
+
+## Run on ubelix
+
+To run on ubelix make create an environment:
+
+```bash
+# Load Anaconda module
+module load Anaconda3
+
+# Initialize conda for your shell
+eval "$(conda shell.bash hook)"
+
+# Create a new environment (replace dl_a2 with your preferred name)
+conda create -n dl_a2 python=3.9 -y
+```
+
+
+```bash
+# Activate your environment
+conda activate dl_a2
+
+# Upgrade pip to latest version
+python -m pip install --upgrade pip
+```
+
+```bash
+# Install all packages from requirements.txt
+pip install -r requirements.txt
+```
