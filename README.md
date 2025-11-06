@@ -40,7 +40,7 @@ module load Anaconda3
 # Initialize conda for your shell
 eval "$(conda shell.bash hook)"
 
-# Create a new environment (replace dl_a2 with your preferred name)
+# Create a new environment 
 conda create -n mia python=3.10 -y
 ```
 
