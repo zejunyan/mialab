@@ -85,6 +85,9 @@ class FeatureExtractor:
             self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY] = \
                 sitk.GradientMagnitude(self.img.images[structure.BrainImageTypes.T2w])
 
+        ## TODO: Modify here
+
+
         self._generate_feature_matrix()
 
         return self.img
