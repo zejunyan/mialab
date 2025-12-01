@@ -44,6 +44,9 @@ class FeatureImageTypes(enum.Enum):
     T1w_GRADIENT_INTENSITY = 3
     T2w_INTENSITY = 4
     T2w_GRADIENT_INTENSITY = 5
+    T1w_FIRST_ORDER = 6
+    T2w_FIRST_ORDER = 7
+
 
 
 class FeatureExtractor:
@@ -60,6 +63,7 @@ class FeatureExtractor:
         self.coordinates_feature = kwargs.get('coordinates_feature', False)
         self.intensity_feature = kwargs.get('intensity_feature', False)
         self.gradient_intensity_feature = kwargs.get('gradient_intensity_feature', False)
+        self.first_order_feature = kwargs.get('first_order_feature', False)
 
     def execute(self) -> structure.BrainImage:
         """Extracts features from an image.
@@ -86,6 +90,16 @@ class FeatureExtractor:
                 sitk.GradientMagnitude(self.img.images[structure.BrainImageTypes.T2w])
 
         ## TODO: Modify here
+        if self.first_order_feature:
+            neighborhood_features = fltr_feat.NeighborhoodFeatureExtractor()       
+            self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER] = \
+                    neighborhood_features.execute(self.img.images[structure.BrainImageTypes.T1w])
+            self.img.feature_images[FeatureImageTypes.T2w_FIRST_ORDER] = \
+                    neighborhood_features.execute(self.img.images[structure.BrainImageTypes.T2w])
+
+        print(f"type of 5 {type(self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY])}")
+        print(f"type of 6 {type(self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER])}")
+
 
 
         self._generate_feature_matrix()

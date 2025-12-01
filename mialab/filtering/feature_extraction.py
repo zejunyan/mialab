@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import pymia.filtering.filter as fltr
 import SimpleITK as sitk
+from tqdm import tqdm
 
 
 class AtlasCoordinates(fltr.Filter):
@@ -104,20 +105,20 @@ def first_order_texture_features_function(values):
     return np.array([mean,
                      np.var(values),  # variance
                      std,
-                     np.sqrt(num_values * (num_values - 1)) / (num_values - 2) * np.sum((values - mean) ** 3) /
-                     (num_values*std**3 + eps),  # adjusted Fisher-Pearson coefficient of skewness
-                     np.sum((values - mean) ** 4) / (num_values * std ** 4 + eps),  # kurtosis
-                     np.sum(-p * np.log2(p)),  # entropy
-                     np.sum(p**2),  # energy (intensity histogram uniformity)
-                     snr,
-                     min_,
-                     max_,
-                     max_ - min_,
-                     np.percentile(values, 10),
-                     np.percentile(values, 25),
-                     np.percentile(values, 50),
-                     np.percentile(values, 75),
-                     np.percentile(values, 90)
+                     # np.sqrt(num_values * (num_values - 1)) / (num_values - 2) * np.sum((values - mean) ** 3) /
+                     # (num_values*std**3 + eps),  # adjusted Fisher-Pearson coefficient of skewness
+                     # np.sum((values - mean) ** 4) / (num_values * std ** 4 + eps),  # kurtosis
+                     # np.sum(-p * np.log2(p)),  # entropy
+                     # np.sum(p**2),  # energy (intensity histogram uniformity)
+                     # snr,
+                     # min_,
+                     # max_,
+                     # max_ - min_,
+                     # np.percentile(values, 10),
+                     # np.percentile(values, 25),
+                     # np.percentile(values, 50),
+                     # np.percentile(values, 75),
+                     # np.percentile(values, 90)
                      ])
 
 
