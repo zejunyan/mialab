@@ -97,8 +97,8 @@ class FeatureExtractor:
             self.img.feature_images[FeatureImageTypes.T2w_FIRST_ORDER] = \
                     neighborhood_features.execute(self.img.images[structure.BrainImageTypes.T2w])
 
-        print(f"type of 5 {type(self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY])}")
-        print(f"type of 6 {type(self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER])}")
+        # print(f"type of 5 {type(self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY])}")
+        # print(f"type of 6 {type(self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER])}")
 
 
 
