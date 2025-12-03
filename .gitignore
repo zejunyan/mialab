@@ -236,3 +236,6 @@ xcuserdata/
 ### Project specific stuff
 *.nii.gz
 *.mha
+
+*.pdf
+.~lock.*

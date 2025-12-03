@@ -4,7 +4,6 @@ import sys
 import numpy as np
 import pymia.filtering.filter as fltr
 import SimpleITK as sitk
-from tqdm import tqdm
 
 
 class AtlasCoordinates(fltr.Filter):
