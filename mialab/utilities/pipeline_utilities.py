@@ -17,6 +17,8 @@ import mialab.filtering.postprocessing as fltr_postp
 import mialab.filtering.preprocessing as fltr_prep
 import mialab.utilities.multi_processor as mproc
 
+from radiomics import firstorder
+
 atlas_t1 = sitk.Image()
 atlas_t2 = sitk.Image()
 
@@ -63,7 +65,7 @@ class FeatureExtractor:
         self.coordinates_feature = kwargs.get('coordinates_feature', False)
         self.intensity_feature = kwargs.get('intensity_feature', False)
         self.gradient_intensity_feature = kwargs.get('gradient_intensity_feature', False)
-        self.first_order_feature = kwargs.get('first_order_feature', False)
+        self.first_order_features = kwargs.get('first_order_features', [])
 
     def execute(self) -> structure.BrainImage:
         """Extracts features from an image.
@@ -90,12 +92,21 @@ class FeatureExtractor:
                 sitk.GradientMagnitude(self.img.images[structure.BrainImageTypes.T2w])
 
         ## TODO: Modify here
-        if self.first_order_feature:
-            neighborhood_features = fltr_feat.NeighborhoodFeatureExtractor()       
-            self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER] = \
-                    neighborhood_features.execute(self.img.images[structure.BrainImageTypes.T1w])
-            self.img.feature_images[FeatureImageTypes.T2w_FIRST_ORDER] = \
-                    neighborhood_features.execute(self.img.images[structure.BrainImageTypes.T2w])
+        if self.first_order_features:
+            first_order_features = firstorder.RadiomicsFirstOrder(self.img.images[structure.BrainImageTypes.T1w], self.img.images[structure.BrainImageTypes.BrainMask])
+            for first_order_feature in self.first_order_features:
+                print(first_order_feature)
+                first_order_features.enableFeatureByName(first_order_feature)
+            print(first_order_features.getFeatureNames().keys())
+            print(first_order_features.enabledFeatures)
+            first_order_features.execute()
+            self.img.feature_images |= first_order_features.featureValues
+
+        print(self.img.feature_images.keys())
+        print(type(self.img.feature_images[FeatureImageTypes.T1w_GRADIENT_INTENSITY]))
+        print(type(self.img.feature_images["Energy"]))
+        # self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER] = \
+        #             first_order_features.execute()
 
         # print(f"type of 5 {type(self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY])}")
         # print(f"type of 6 {type(self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER])}")
