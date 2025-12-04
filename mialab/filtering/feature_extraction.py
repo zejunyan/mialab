@@ -5,6 +5,8 @@ import numpy as np
 import pymia.filtering.filter as fltr
 import SimpleITK as sitk
 
+from tqdm import tqdm
+
 
 class AtlasCoordinates(fltr.Filter):
     """Represents an atlas coordinates feature extractor."""
@@ -170,8 +172,8 @@ class NeighborhoodFeatureExtractor(fltr.Filter):
         x_offset = self.kernel[0]
         pad = ((0, z_offset), (0, y_offset), (0, x_offset))
         img_arr_padded = np.pad(img_arr, pad, 'symmetric')
-
-        for xx in range(x):
+        
+        for xx in tqdm(range(x), desc="Extracting neighborhood features", unit="slice"):
             for yy in range(y):
                 for zz in range(z):
 

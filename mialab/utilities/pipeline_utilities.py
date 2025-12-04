@@ -17,7 +17,7 @@ import mialab.filtering.postprocessing as fltr_postp
 import mialab.filtering.preprocessing as fltr_prep
 import mialab.utilities.multi_processor as mproc
 
-from radiomics import firstorder
+from radiomics import firstorder, glcm, glrlm, glszm, gldm, ngtdm, shape
 
 atlas_t1 = sitk.Image()
 atlas_t2 = sitk.Image()
@@ -46,8 +46,8 @@ class FeatureImageTypes(enum.Enum):
     T1w_GRADIENT_INTENSITY = 3
     T2w_INTENSITY = 4
     T2w_GRADIENT_INTENSITY = 5
-    T1w_FIRST_ORDER = 6
-    T2w_FIRST_ORDER = 7
+    T1w_NEIGHBORHOOD_FIRSTORDER = 6
+    T2w_NEIGHBORHOOD_FIRSTORDER = 7
 
 
 
@@ -65,7 +65,9 @@ class FeatureExtractor:
         self.coordinates_feature = kwargs.get('coordinates_feature', False)
         self.intensity_feature = kwargs.get('intensity_feature', False)
         self.gradient_intensity_feature = kwargs.get('gradient_intensity_feature', False)
-        self.first_order_features = kwargs.get('first_order_features', [])
+        self.neighborhood_features = kwargs.get('neighborhood_features', False)
+        
+        self.PyRadiomics_features = kwargs.get('PyRadiomics_features', {})
 
     def execute(self) -> structure.BrainImage:
         """Extracts features from an image.
@@ -74,7 +76,7 @@ class FeatureExtractor:
             structure.BrainImage: The image with extracted features.
         """
         # todo - done: add T2w features
-
+        
         if self.coordinates_feature:
             atlas_coordinates = fltr_feat.AtlasCoordinates()
             self.img.feature_images[FeatureImageTypes.ATLAS_COORD] = \
@@ -90,28 +92,27 @@ class FeatureExtractor:
                 sitk.GradientMagnitude(self.img.images[structure.BrainImageTypes.T1w])
             self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY] = \
                 sitk.GradientMagnitude(self.img.images[structure.BrainImageTypes.T2w])
+                
+        if self.neighborhood_features:
+            nhood_extractor = fltr_feat.NeighborhoodFeatureExtractor()
+            self.img.feature_images[FeatureImageTypes.T1w_NEIGHBORHOOD_FIRSTORDER] = \
+                nhood_extractor.execute(self.img.images[structure.BrainImageTypes.T1w])
+            self.img.feature_images[FeatureImageTypes.T2w_NEIGHBORHOOD_FIRSTORDER] = \
+                nhood_extractor.execute(self.img.images[structure.BrainImageTypes.T2w])
 
         ## TODO: Modify here
-        if self.first_order_features:
-            first_order_features = firstorder.RadiomicsFirstOrder(self.img.images[structure.BrainImageTypes.T1w], self.img.images[structure.BrainImageTypes.BrainMask])
-            for first_order_feature in self.first_order_features:
-                print(first_order_feature)
-                first_order_features.enableFeatureByName(first_order_feature)
-            print(first_order_features.getFeatureNames().keys())
-            print(first_order_features.enabledFeatures)
-            first_order_features.execute()
-            self.img.feature_images |= first_order_features.featureValues
+        if self.PyRadiomics_features:
+            mask = self.img.images[structure.BrainImageTypes.BrainMask]
+            image_T1 = self.img.images[structure.BrainImageTypes.T1w]
+            image_T2 = self.img.images[structure.BrainImageTypes.T2w]
 
-        print(self.img.feature_images.keys())
-        print(type(self.img.feature_images[FeatureImageTypes.T1w_GRADIENT_INTENSITY]))
-        print(type(self.img.feature_images["Energy"]))
-        # self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER] = \
-        #             first_order_features.execute()
+            self.img.pr_results = {}
 
-        # print(f"type of 5 {type(self.img.feature_images[FeatureImageTypes.T2w_GRADIENT_INTENSITY])}")
-        # print(f"type of 6 {type(self.img.feature_images[FeatureImageTypes.T1w_FIRST_ORDER])}")
-
-
+            t1_results = self._run_pyradiomics_for_image(image_T1, mask, modality_tag="T1")
+            self.img.pr_results.update(t1_results)
+            
+            t2_results = self._run_pyradiomics_for_image(image_T2, mask, modality_tag="T2")
+            self.img.pr_results.update(t2_results)
 
         self._generate_feature_matrix()
 
@@ -149,11 +150,19 @@ class FeatureExtractor:
         data = np.concatenate(
             [self._image_as_numpy_array(image, mask) for id_, image in self.img.feature_images.items()],
             axis=1)
+        
+        if hasattr(self.img, "pr_results") and self.img.pr_results:
+            pr_names = sorted(self.img.pr_results.keys())
+            pr_vec = np.array([float(self.img.pr_results[name]) for name in pr_names], dtype=np.float32)
+            pr_block = np.repeat(pr_vec[np.newaxis, :], data.shape[0], axis=0)
+            data = np.concatenate([data, pr_block], axis=1)
+            self.img.pr_feature_names = pr_names
 
         # generate labels (note that we assume to have a ground truth even for testing)
         labels = self._image_as_numpy_array(self.img.images[structure.BrainImageTypes.GroundTruth], mask)
 
         self.img.feature_matrix = (data.astype(np.float32), labels.astype(np.int16))
+        print(self.img.feature_matrix)
 
     @staticmethod
     def _image_as_numpy_array(image: sitk.Image, mask: np.ndarray = None):
@@ -186,6 +195,59 @@ class FeatureExtractor:
             image = masked_image[~masked_image.mask]
 
         return image.reshape((no_voxels, number_of_components))
+    
+    def _run_pyradiomics_for_image(self, image: sitk.Image, mask: sitk.Image, modality_tag: str):
+        results_flat = {}
+
+        for feature_category, feature_list in self.PyRadiomics_features.items():
+            if not feature_list:
+                continue
+
+            # Pick the right extractor class
+            if feature_category == 'first_order':
+                extractor = firstorder.RadiomicsFirstOrder(image, mask)
+
+            elif feature_category == 'glcm':
+                extractor = glcm.RadiomicsGLCM(image, mask)
+
+            elif feature_category == 'glrlm':
+                extractor = glrlm.RadiomicsGLRLM(image, mask)
+
+            elif feature_category == 'glszm':
+                extractor = glszm.RadiomicsGLSZM(image, mask)
+
+            elif feature_category == 'gldm':
+                extractor = gldm.RadiomicsGLDM(image, mask)
+
+            elif feature_category == 'ngtdm':
+                extractor = ngtdm.RadiomicsNGTDM(image, mask)
+
+            elif feature_category == 'shape':
+                extractor = shape.RadiomicsShape(image, mask)
+
+            else:
+                continue  # unknown category
+
+            # Enable only the requested features
+            for feat_name in feature_list:
+                extractor.enableFeatureByName(feat_name)
+
+            # Compute features
+            results = extractor.execute()
+
+            # Drop diagnostics_*
+            clean_results = {
+                k: v for k, v in results.items()
+                if not k.startswith('diagnostics_')
+            }
+
+            # Flatten into a single dict with modality + category prefix
+            for k, v in clean_results.items():
+                # k is e.g. 'firstorder_Energy' or 'glcm_Contrast'
+                full_name = f"{modality_tag}_{feature_category}_{k}"
+                results_flat[full_name] = v
+
+        return results_flat
 
 
 def pre_process(id_: str, paths: dict, **kwargs) -> structure.BrainImage:

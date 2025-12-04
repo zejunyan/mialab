@@ -59,19 +59,27 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
                                           futil.BrainImageFilePathGenerator(),
                                           futil.DataDirectoryFilter())
     # TODO: Modify here
-    first_order_features = [
-                "Energy",
-            ]
+    PyRadiomics_features = {
+        'first_order': ['Entropy', 'Energy'],
+        'glcm': [],
+        'glrlm': [],
+        'glszm': [],
+        'gldm': [],
+        'ngtdm': [],
+        'shape': []
+    }
+    
     pre_process_params = {'skullstrip_pre': True,
                           'normalization_pre': True,
                           'registration_pre': True,
                           'coordinates_feature': True,
                           'intensity_feature': True,
                           'gradient_intensity_feature': True,
-                          'first_order_features': first_order_features}
+                          'neighborhood_features': True,
+                          'PyRadiomics_features': PyRadiomics_features}
 
     # load images for training and pre-process
-    images = putil.pre_process_batch(crawler.data, pre_process_params, multi_process=False)
+    images = putil.pre_process_batch(crawler.data, pre_process_params, multi_process=True)
 
     # generate feature matrix and label vector
     data_train = np.concatenate([img.feature_matrix[0] for img in images])
@@ -103,7 +111,7 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
 
     # load images for testing and pre-process
     pre_process_params['training'] = False
-    images_test = putil.pre_process_batch(crawler.data, pre_process_params, multi_process=False)
+    images_test = putil.pre_process_batch(crawler.data, pre_process_params, multi_process=True)
 
     images_prediction = []
     images_probabilities = []
@@ -176,21 +184,21 @@ if __name__ == "__main__":
     parser.add_argument(
         '--data_atlas_dir',
         type=str,
-        default=os.path.normpath(os.path.join(script_dir, '../data/atlas')),
+        default=os.path.normpath(os.path.join(script_dir, './data/atlas')),
         help='Directory with atlas data.'
     )
 
     parser.add_argument(
         '--data_train_dir',
         type=str,
-        default=os.path.normpath(os.path.join(script_dir, '../data/train/')),
+        default=os.path.normpath(os.path.join(script_dir, './data/train/')),
         help='Directory with training data.'
     )
 
     parser.add_argument(
         '--data_test_dir',
         type=str,
-        default=os.path.normpath(os.path.join(script_dir, '../data/test/')),
+        default=os.path.normpath(os.path.join(script_dir, './data/test/')),
         help='Directory with testing data.'
     )
 
