@@ -14,6 +14,7 @@ import sklearn.ensemble as sk_ensemble
 import numpy as np
 import pymia.data.conversion as conversion
 import pymia.evaluation.writer as writer
+from mialab.utilities.pipeline_utilities import mi_feature_selection
 
 try:
     import mialab.data.structure as structure
@@ -60,12 +61,20 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
                                           futil.DataDirectoryFilter())
     # TODO: Modify here
     PyRadiomics_features = {
-        'first_order': ['Entropy', 'Energy'],
-        'glcm': [],
-        'glrlm': [],
-        'glszm': [],
-        'gldm': [],
-        'ngtdm': [],
+        'first_order': ["Mean", "Median", "Variance", "Skewness", "Kurtosis",
+        "Energy", "Entropy"],
+        'glcm': ["Contrast", "Correlation", "Idm",
+        "JointEntropy", "JointEnergy",
+        "Autocorrelation", "ClusterProminence",
+        "ClusterShade", "DifferenceVariance"],
+        'glrlm': ["ShortRunEmphasis", "LongRunEmphasis",
+        "GrayLevelNonUniformity", "RunEntropy"],
+        'glszm': ["SmallAreaEmphasis", "LargeAreaEmphasis",
+        "ZoneEntropy", "ZoneVariance"],
+        'gldm': ["DependenceNonUniformity", 
+        "DependenceEntropy", 
+        "GrayLevelVariance"],
+        'ngtdm': ["Coarseness", "Contrast"],
         'shape': []
     }
     
@@ -75,22 +84,57 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
                           'coordinates_feature': True,
                           'intensity_feature': True,
                           'gradient_intensity_feature': True,
-                          'neighborhood_features': False,
-                          'PyRadiomics_features': None}
+                          'neighborhood_features': True,
+                          'PyRadiomics_features': PyRadiomics_features}
 
     # load images for training and pre-process
     images = putil.pre_process_batch(crawler.data, pre_process_params, multi_process=True)
+
+    # @by me --- DEBUG: print internal structure of first image ---
+    print("\n===== DEBUG: images[0].__dict__ =====")
+    print(images[0].__dict__)
+    print("=====================================\n")
     
     # generate feature matrix and label vector
     data_train = np.concatenate([img.feature_matrix[0] for img in images])
     labels_train = np.concatenate([img.feature_matrix[1] for img in images]).squeeze()
 
-    forest = sk_ensemble.RandomForestClassifier(max_features=images[0].feature_matrix[0].shape[1],
+    # --- @by me Print feature table for inspection (before MI selection) ---
+    print("data_train shape:", data_train.shape)      # number of samples × number of features
+    print("First few rows of data_train:\n", data_train[:5, :])  # first 5 samples
+    # Optionally: print feature counts per class
+    print("Unique labels in training set:", np.unique(labels_train, return_counts=True))
+    
+    #@by me
+    # ---------------- Mutual Information feature selection (train) ----------------
+    k_features = 50 # choose how many features you want to keep
+    data_train_sel, _, _, selector = mi_feature_selection(X_train=data_train,
+                                                          y_train=labels_train,
+                                                          X_val=None,
+                                                          X_test=None,
+                                                          k=k_features)
+    print("selected_data_train shape:", data_train_sel.shape)      # number of samples × number of features after feature selection
+    
+    # ---- PRINT SELECTED FEATURES ----
+    selected_mask = selector.get_support()
+    selected_indices = np.where(selected_mask)[0]
+    mi_scores = selector.scores_
+
+    print("Selected feature indices:", selected_indices)
+    for idx in selected_indices:
+        print(f"Feature {idx}: MI = {mi_scores[idx]:.4f}")
+    # ---------------------------------
+    # -------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------
+    #RF classifier (use features from both image 1 and 2, meaning the same set of features is extracted from both images)
+    forest = sk_ensemble.RandomForestClassifier(#max_features=images[0].feature_matrix[0].shape[1],
+                                                max_features=data_train_sel.shape[1],   # number of MI-selected features
                                                 n_estimators=10,
                                                 max_depth=6)
 
     start_time = timeit.default_timer()
-    forest.fit(data_train, labels_train)
+    forest.fit(data_train_sel, labels_train) #@by me, this allows to use selected fearures for classification
+    #forest.fit(data_train, labels_train)
     print(' Time elapsed:', timeit.default_timer() - start_time, 's')
 
     # create a result directory with timestamp
@@ -117,11 +161,21 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
     images_probabilities = []
 
     for img in images_test:
+
         print('-' * 10, 'Testing', img.id_)
 
         start_time = timeit.default_timer()
-        predictions = forest.predict(img.feature_matrix[0])
-        probabilities = forest.predict_proba(img.feature_matrix[0])
+        #------------------------------------------------------------------
+        # apply same MI selector to test features
+        test_features = img.feature_matrix[0]
+        test_features_sel = selector.transform(test_features)
+
+        predictions = forest.predict(test_features_sel)
+        probabilities = forest.predict_proba(test_features_sel)
+        #predictions = forest.predict(img.feature_matrix[0])
+        #probabilities = forest.predict_proba(img.feature_matrix[0])
+
+        #------------------------------------------------------------------
         print(' Time elapsed:', timeit.default_timer() - start_time, 's')
 
         # convert prediction and probabilities back to SimpleITK images
@@ -184,21 +238,21 @@ if __name__ == "__main__":
     parser.add_argument(
         '--data_atlas_dir',
         type=str,
-        default=os.path.normpath(os.path.join(script_dir, './data/atlas')),
+        default=os.path.normpath(os.path.join(script_dir, '../data/atlas')),
         help='Directory with atlas data.'
     )
 
     parser.add_argument(
         '--data_train_dir',
         type=str,
-        default=os.path.normpath(os.path.join(script_dir, './data/train/')),
+        default=os.path.normpath(os.path.join(script_dir, '../data/train/')),
         help='Directory with training data.'
     )
 
     parser.add_argument(
         '--data_test_dir',
         type=str,
-        default=os.path.normpath(os.path.join(script_dir, './data/test/')),
+        default=os.path.normpath(os.path.join(script_dir, '../data/test/')),
         help='Directory with testing data.'
     )
 

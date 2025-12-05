@@ -17,6 +17,8 @@ import mialab.filtering.postprocessing as fltr_postp
 import mialab.filtering.preprocessing as fltr_prep
 import mialab.utilities.multi_processor as mproc
 
+from sklearn.feature_selection import mutual_info_classif, SelectKBest
+
 from radiomics import firstorder, glcm, glrlm, glszm, gldm, ngtdm, shape
 
 atlas_t1 = sitk.Image()
@@ -451,3 +453,28 @@ def post_process_batch(brain_images: t.List[structure.BrainImage], segmentations
     else:
         pp_images = [post_process(img, seg, prob, **post_process_params) for img, seg, prob in param_list]
     return pp_images
+
+
+##@by me for mi_feature_selection
+
+def mi_feature_selection(X_train, y_train, X_val=None, X_test=None, k=30):
+    """
+    Select top-k features using Mutual Information for classification.
+
+    Args:
+        X_train (ndarray): Training features (n_samples, n_features)
+        y_train (ndarray): Training labels (n_samples,)
+        X_val (ndarray): Validation features (optional)
+        X_test (ndarray): Test features (optional)
+        k (int): Number of features to keep
+
+    Returns:
+        X_train_sel, X_val_sel, X_test_sel, selector
+    """
+    selector = SelectKBest(score_func=mutual_info_classif, k=k)
+    X_train_sel = selector.fit_transform(X_train, y_train)
+
+    X_val_sel = selector.transform(X_val) if X_val is not None else None
+    X_test_sel = selector.transform(X_test) if X_test is not None else None
+
+    return X_train_sel, X_val_sel, X_test_sel, selector
