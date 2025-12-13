@@ -457,24 +457,69 @@ def post_process_batch(brain_images: t.List[structure.BrainImage], segmentations
 
 ##@by me for mi_feature_selection
 
-def mi_feature_selection(X_train, y_train, X_val=None, X_test=None, k=30):
+# def mi_feature_selection(X_train, y_train, X_val=None, X_test=None, k=30):
+#     """
+#     Select top-k features using Mutual Information for classification.
+
+#     Args:
+#         X_train (ndarray): Training features (n_samples, n_features)
+#         y_train (ndarray): Training labels (n_samples,)
+#         X_val (ndarray): Validation features (optional)
+#         X_test (ndarray): Test features (optional)
+#         k (int): Number of features to keep
+
+#     Returns:
+#         X_train_sel, X_val_sel, X_test_sel, selector
+#     """
+#     selector = SelectKBest(score_func=mutual_info_classif, k=k)
+#     X_train_sel = selector.fit_transform(X_train, y_train)
+
+#     X_val_sel = selector.transform(X_val) if X_val is not None else None
+#     X_test_sel = selector.transform(X_test) if X_test is not None else None
+
+#     return X_train_sel, X_val_sel, X_test_sel, selector
+
+
+
+
+from sklearn.feature_selection import mutual_info_classif
+
+class MISelector:
+    """Custom selector object that mimics sklearn selectors."""
+    def __init__(self, selected_idx, mi_scores):
+        self.selected_idx = selected_idx
+        self.mi_scores = mi_scores
+
+    def transform(self, X):
+        return X[:, self.selected_idx]
+
+    def get_support(self):
+        return self.selected_idx
+
+
+def mi_feature_selection(X_train, y_train, X_val=None, X_test=None, threshold=0.5):
     """
-    Select top-k features using Mutual Information for classification.
-
-    Args:
-        X_train (ndarray): Training features (n_samples, n_features)
-        y_train (ndarray): Training labels (n_samples,)
-        X_val (ndarray): Validation features (optional)
-        X_test (ndarray): Test features (optional)
-        k (int): Number of features to keep
-
-    Returns:
-        X_train_sel, X_val_sel, X_test_sel, selector
+    Select all features whose MI score >= threshold.
+    Returns: X_train_sel, X_val_sel, X_test_sel, selector (with .transform()).
     """
-    selector = SelectKBest(score_func=mutual_info_classif, k=k)
-    X_train_sel = selector.fit_transform(X_train, y_train)
 
+    # Compute MI scores
+    mi_scores = mutual_info_classif(X_train, y_train, random_state=42)
+
+    # Determine selected features
+    selected_idx = np.where(mi_scores >= threshold)[0]
+
+    # Create sklearn-like selector object
+    selector = MISelector(selected_idx, mi_scores)
+
+    # Apply feature selection
+    X_train_sel = selector.transform(X_train)
     X_val_sel = selector.transform(X_val) if X_val is not None else None
     X_test_sel = selector.transform(X_test) if X_test is not None else None
+
+    # Debug prints
+    print(f"[MI] Threshold = {threshold}")
+    print(f"[MI] Selected {len(selected_idx)} features out of {len(mi_scores)}")
+    print("[MI] Selected indices:", selected_idx)
 
     return X_train_sel, X_val_sel, X_test_sel, selector
