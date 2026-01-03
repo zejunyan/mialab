@@ -64,12 +64,12 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
     # TODO: Modify here
     PyRadiomics_features = {
         'first_order': ["Mean", "Median", "Variance", "Skewness", "Kurtosis", "Energy", "Entropy"], # 7 + 14 = 21 features
-        #'glcm': ["Contrast", "Correlation", "Idm","JointEntropy", "JointEnergy", "Autocorrelation", "ClusterProminence", "ClusterShade", "DifferenceVariance"], # 7 + 18 = 25 features
-        #'glrlm': ["ShortRunEmphasis", "LongRunEmphasis", "GrayLevelNonUniformity", "RunEntropy"], #7 + 8 = 15 features
-        #'glszm': ["SmallAreaEmphasis", "LargeAreaEmphasis", "ZoneEntropy", "ZoneVariance"], #7 + 8 = 15 features
+        'glcm': ["Contrast", "Correlation", "Idm","JointEntropy", "JointEnergy", "Autocorrelation", "ClusterProminence", "ClusterShade", "DifferenceVariance"], # 7 + 18 = 25 features
+        'glrlm': ["ShortRunEmphasis", "LongRunEmphasis", "GrayLevelNonUniformity", "RunEntropy"], #7 + 8 = 15 features
+        'glszm': ["SmallAreaEmphasis", "LargeAreaEmphasis", "ZoneEntropy", "ZoneVariance"], #7 + 8 = 15 features
         'gldm': ["DependenceNonUniformity", "DependenceEntropy", "GrayLevelVariance"], #7 + 6 = 13 features
-        #'ngtdm': ["Coarseness", "Contrast", "Busyness","Complexity","Strength"], #7 + 10 = 21 features
-        #'shape': ["MeshVolume","VoxelVolume","SurfaceArea","SurfaceVolumeRatio","Sphericity", "Maximum3DDiameter","Maximum2DDiameterSlice","Maximum2DDiameterColumn","Maximum2DDiameterRow","MajorAxisLength", "MinorAxisLength","LeastAxisLength","Elongation","Flatness"] #35
+        'ngtdm': ["Coarseness", "Contrast", "Busyness","Complexity","Strength"], #7 + 10 = 21 features
+        'shape': ["MeshVolume","VoxelVolume","SurfaceArea","SurfaceVolumeRatio","Sphericity", "Maximum3DDiameter","Maximum2DDiameterSlice","Maximum2DDiameterColumn","Maximum2DDiameterRow","MajorAxisLength", "MinorAxisLength","LeastAxisLength","Elongation","Flatness"] #35
    }
     
     pre_process_params = {'skullstrip_pre': True,
@@ -86,13 +86,13 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
     # load images for training and pre-process
     images = putil.pre_process_batch(crawler.data, pre_process_params, multi_process=True)
 
-    # @by me --- DEBUG: print internal structure of first image ---
+    #--- DEBUG: print internal structure of first image ---
     print("\n===== DEBUG: images[0].__dict__ =====")
     print(images[0].__dict__)
     print("=====================================\n")
 
     # -----------------------------------------------------------
-    # BEST PRACTICE: build feature names WHEN you use feature_matrix
+    # BEST PRACTICE: build feature names when using feature_matrix
     # and store them together as (X, y, feature_names)
     # -----------------------------------------------------------
     def build_feature_names(pre_process_params, n_cols):
@@ -117,7 +117,6 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
                 for feat in feature_list:
                     names.append(f"{modality}_RADIOMICS_{family}_{feat}")
 
-        # safety check
         if len(names) != n_cols:
             raise ValueError(
                 f"feature_names length ({len(names)}) != X columns ({n_cols}). "
@@ -134,21 +133,85 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
         X, y = img.feature_matrix
         img.feature_matrix = (X, y, feature_names)
 
-    
     # generate feature matrix and label vector
 
-    use_mi_selection = True          # <--- change this to False to use ALL features
+    use_mi_selection = False          # <--- change this to False to use ALL features
 
     data_train = np.concatenate([img.feature_matrix[0] for img in images])
     labels_train = np.concatenate([img.feature_matrix[1] for img in images]).squeeze()
 
-    # --- @by me Print feature table for inspection (before MI selection) ---
+    # ---Print feature table for inspection (before MI selection) ---
     print("data_train shape:", data_train.shape)      # number of samples × number of features
     print("First few rows of data_train:\n", data_train[:5, :])  # first 5 samples
     # Optionally: print feature counts per class
     print("Unique labels in training set:", np.unique(labels_train, return_counts=True))
+
+ 
+
+    # NEW: retrieve feature names from feature_matrix
+    feature_names = images[0].feature_matrix[2]
+
+    # NEW: define the 7 core features to analyse
+    core_cols = [
+        "ATLAS_COORD_X", "ATLAS_COORD_Y", "ATLAS_COORD_Z",
+        "T1_INTENSITY", "T2_INTENSITY",
+        "T1_GRADIENT", "T2_GRADIENT",
+    ]
+    # map feature names to column indices
+    name_to_idx = {name: idx for idx, name in enumerate(feature_names)}
+
+    # safety check (prevents silent bugs)
+    missing = [c for c in core_cols if c not in name_to_idx]
+    if missing:
+        raise ValueError(f"Missing core features: {missing}")
+
+    core_idx = [name_to_idx[c] for c in core_cols]
+
+    # extract ALL rows, ONLY the 7 columns
+    X_core = data_train[:, core_idx]   # shape = (n_samples, 7)
+
+    # convert to a labelled table for correlation analysis
+    try:
+        
+        core_table = pd.DataFrame(X_core, columns=core_cols)
+    except ImportError:
+        core_table = X_core
+
+    print("this is the core table: ")
+    print(core_table)
+    # correlation matrix (Pearson)
+    corr_7x7 = np.corrcoef(X_core, rowvar=False)   # shape: (7, 7)
+
+    try:
+        
+        corr_table = pd.DataFrame(corr_7x7, index=core_cols, columns=core_cols)
+
+        print("\nCorrelation matrix (Pearson) for core features:")
+        print(corr_table.round(3))
+
+        # ---------------------------
+        # Group-level correlation summary
+        # ---------------------------
+        groups = {
+            "coordinates": ["ATLAS_COORD_X", "ATLAS_COORD_Y", "ATLAS_COORD_Z"],
+            "intensity": ["T1_INTENSITY", "T2_INTENSITY"],
+            "gradient": ["T1_GRADIENT", "T2_GRADIENT"],
+        }
+
+        group_summary = {}
+        for g1, cols1 in groups.items():
+            for g2, cols2 in groups.items():
+                sub_corr = corr_table.loc[cols1, cols2].abs().values
+                group_summary[(g1, g2)] = sub_corr.mean()
+
+        group_corr_table = pd.Series(group_summary).unstack().round(3)
+
+        print("\nGroup-level mean absolute correlation:")
+        print(group_corr_table)
+    except ImportError:
+        print("\nCorrelation matrix (Pearson) for core features:")
+        print(np.round(corr_7x7, 3))
     
-    #@by me
 
     # -------------------- (optional) MI feature selection --------------------
     
