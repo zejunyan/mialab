@@ -91,10 +91,6 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
     print(images[0].__dict__)
     print("=====================================\n")
 
-    # -----------------------------------------------------------
-    # BEST PRACTICE: build feature names when using feature_matrix
-    # and store them together as (X, y, feature_names)
-    # -----------------------------------------------------------
     def build_feature_names(pre_process_params, n_cols):
         names = []
 
@@ -146,8 +142,6 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
     # Optionally: print feature counts per class
     print("Unique labels in training set:", np.unique(labels_train, return_counts=True))
 
- 
-
     # NEW: retrieve feature names from feature_matrix
     feature_names = images[0].feature_matrix[2]
 
@@ -189,9 +183,6 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
         print("\nCorrelation matrix (Pearson) for core features:")
         print(corr_table.round(3))
 
-        # ---------------------------
-        # Group-level correlation summary
-        # ---------------------------
         groups = {
             "coordinates": ["ATLAS_COORD_X", "ATLAS_COORD_Y", "ATLAS_COORD_Z"],
             "intensity": ["T1_INTENSITY", "T2_INTENSITY"],
@@ -213,13 +204,13 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
         print(np.round(corr_7x7, 3))
     
 
-    # -------------------- (optional) MI feature selection --------------------
+    #  (optional) MI feature selection
     
     selector = None
     selected_idx = None   # <-- add
 
     if use_mi_selection:
-        # ---- 1) compute MI scores ----
+        # 1) compute MI scores ----
         _, _, _, selector = mi_feature_selection(   # <-- don't need data_train_sel
             X_train=data_train,
             y_train=labels_train,
@@ -246,7 +237,7 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
         df_mi.to_csv(mi_csv_path, index=False)
         print(f"[MI] Saved MI scores for all features to: {mi_csv_path}")
 
-        # ---- 2) Guarantee: keep core + top-K radiomics ----
+        # 2) Guarantee: keep core + top-K radiomics ----
         TOPK_RADIOMICS = 10
 
         CORE = {
@@ -331,7 +322,6 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
         print('-' * 10, 'Testing', img.id_)
 
         start_time = timeit.default_timer()
-        #------------------------------------------------------------------
         # apply same MI selector to test features
         test_features = img.feature_matrix[0]
         # Apply MI selector only if we actually used MI during training
@@ -346,7 +336,6 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
         probabilities = forest.predict_proba(test_features_rf)
         #predictions = forest.predict(img.feature_matrix[0])
         #probabilities = forest.predict_proba(img.feature_matrix[0])
-        #------------------------------------------------------------------
         print(' Time elapsed:', timeit.default_timer() - start_time, 's')
 
         # convert prediction and probabilities back to SimpleITK images
@@ -366,12 +355,38 @@ def main(result_dir: str, data_atlas_dir: str, data_train_dir: str, data_test_di
                                                      post_process_params, multi_process=True)
 
     for i, img in enumerate(images_test):
-        evaluator.evaluate(images_post_processed[i], img.images[structure.BrainImageTypes.GroundTruth],
-                           img.id_ + '-PP')
+        evaluator.evaluate(images_post_processed[i],
+                        img.images[structure.BrainImageTypes.GroundTruth],
+                        img.id_ + '-PP')
 
-        # save results
-        sitk.WriteImage(images_prediction[i], os.path.join(result_dir, images_test[i].id_ + '_SEG.mha'), True)
-        sitk.WriteImage(images_post_processed[i], os.path.join(result_dir, images_test[i].id_ + '_SEG-PP.mha'), True)
+        sitk.WriteImage(images_prediction[i],
+                        os.path.join(result_dir, img.id_ + '_SEG_atlas.mha'), True)
+        sitk.WriteImage(images_post_processed[i],
+                        os.path.join(result_dir, img.id_ + '_SEG-PP_atlas.mha'), True)
+
+        # Load original native T1 as reference
+        t1_native_path = os.path.join(img.path, 'T1native.nii.gz')
+        t1_native = sitk.ReadImage(t1_native_path)
+
+        # Registration transform stored in BrainImage is native -> atlas.
+        # We need the inverse: atlas -> native
+        tx_native_to_atlas = img.transformation
+        tx_atlas_to_native = tx_native_to_atlas.GetInverse()
+
+        # Set up a resampler that maps atlas-space segmentations to native space
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetReferenceImage(t1_native)              # size/spacing/origin/dir of original image
+        resampler.SetTransform(tx_atlas_to_native)
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor) 
+
+        seg_native = resampler.Execute(images_prediction[i])
+        seg_pp_native = resampler.Execute(images_post_processed[i])
+
+        # Save native-space segmentations (same dimensions as T1native.nii.gz)
+        sitk.WriteImage(seg_native,
+                        os.path.join(result_dir, img.id_ + '_SEG_native.nii.gz'), True)
+        sitk.WriteImage(seg_pp_native,
+                        os.path.join(result_dir, img.id_ + '_SEG-PP_native.nii.gz'), True)
 
     # use two writers to report the results
     os.makedirs(result_dir, exist_ok=True)  # generate result directory, if it does not exists

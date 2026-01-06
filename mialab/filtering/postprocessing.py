@@ -1,155 +1,158 @@
-import numpy as np
-import pymia.filtering.filter as pymia_fltr
-import SimpleITK as sitk
-
 """The post-processing module contains classes for image filtering mostly applied after a classification.
 
 Image post-processing aims to alter images such that they depict a desired representation.
 """
 import warnings
 
-# import numpy as np
+import numpy as np
 # import pydensecrf.densecrf as crf
 # import pydensecrf.utils as crf_util
 import pymia.filtering.filter as pymia_fltr
 import SimpleITK as sitk
-from scipy.ndimage import generic_filter
 
 
 class ImagePostProcessing(pymia_fltr.Filter):
-    """Represents a post-processing filter.
+    """Post-processing for multi-label brain segmentation.
 
-    Steps:
-        1) Remove tiny isolated blobs (connected components smaller than `min_size`)
-           for labels 1–5.
-        2) For Hippocampus (3) and Amygdala (4), apply a local neighborhood-based
-           relabeling: if a voxel is surrounded by many neighbors of that label,
-           it is relabeled to that structure (fills small gaps / holes).
+    Focuses on improving small structures like Hippocampus (3) and Amygdala (4)
+    by:
+        1) Removing tiny connected components.
+        2) Keeping at most two largest blobs for 3 and 4 (left/right).
+        3) Applying a small morphological closing on those cleaned blobs.
     """
 
-    def __init__(self, min_size: int = 3,
-                 nhood_threshold_hip: int = 5,
-                 nhood_threshold_amyg: int = 5):
-        """Initializes a new instance of the ImagePostProcessing class.
-
+    def __init__(self,
+                 min_size_small: int = 20,
+                 min_size_large: int = 10,
+                 hip_label: int = 3,
+                 amyg_label: int = 4,
+                 max_components_small: int = 2):
+        """
         Args:
-            min_size (int): Minimum number of voxels for a connected component
-                to be kept. Components smaller than this are removed.
-            nhood_threshold_hip (int): Minimum number of neighbors with label 3
-                (Hippocampus) in a 3x3x3 window to relabel a voxel to 3.
-            nhood_threshold_amyg (int): Minimum number of neighbors with label 4
-                (Amygdala) in a 3x3x3 window to relabel a voxel to 4.
+            min_size_small: minimum size (voxels) for hippo/amygdala components.
+            min_size_large: minimum size (voxels) for other labels (1, 2, 5).
+            hip_label: label id used for hippocampus in the ground truth.
+            amyg_label: label id used for amygdala in the ground truth.
+            max_components_small: max number of components to keep for
+                                  hippocampus/amygdala (typically 2: left/right).
         """
         super().__init__()
-        self.min_size = min_size
-        self.nhood_threshold_hip = nhood_threshold_hip
-        self.nhood_threshold_amyg = nhood_threshold_amyg
+        self.min_size_small = min_size_small
+        self.min_size_large = min_size_large
+        self.hip_label = hip_label
+        self.amyg_label = amyg_label
+        self.max_components_small = max_components_small
 
-    def _majority_relabel(self, seg_arr: np.ndarray,
-                          target_label: int,
-                          threshold: int) -> np.ndarray:
-        """Relabel voxels to `target_label` if enough neighbors are that label.
+    @staticmethod
+    def _keep_components(mask_img: sitk.Image,
+                         min_size: int,
+                         max_components: int | None = None) -> sitk.Image:
+        """Keep connected components above min_size, optionally only the largest N.
 
-        Uses a 3x3x3 neighborhood. If the center voxel is not `target_label`
-        and at least `threshold` neighbors are `target_label`, the center voxel
-        is relabeled to `target_label`.
+        Args:
+            mask_img: binary Sitk image (0/1) for a single label.
+            min_size: minimum number of voxels per component.
+            max_components: if not None, keep only the largest N components.
+
+        Returns:
+            A binary Sitk image with only the selected components.
         """
+        # Connected components
+        cc = sitk.ConnectedComponent(mask_img)
 
-        def func(window):
-            center = window[len(window) // 2]
-            # If it's already the target label, keep it
-            if center == target_label:
-                return target_label
-            # Count neighbors that are the target label
-            count = np.sum(window == target_label)
-            if count >= threshold:
-                return target_label
-            else:
-                return center
+        # Collect stats
+        stats = sitk.LabelShapeStatisticsImageFilter()
+        stats.Execute(cc)
 
-        footprint = np.ones((3, 3, 3), dtype=bool)
-        # Apply filter over 3D segmentation
-        relabeled = generic_filter(
-            seg_arr,
-            function=func,
-            footprint=footprint,
-            mode="nearest"
+        # Get labels sorted by size (descending)
+        labels = list(stats.GetLabels())
+        labels_sorted = sorted(
+            labels,
+            key=lambda lbl: stats.GetNumberOfPixels(lbl),
+            reverse=True
         )
-        return relabeled.astype(seg_arr.dtype)
+
+        # Filter by size
+        labels_filtered = [
+            lbl for lbl in labels_sorted
+            if stats.GetNumberOfPixels(lbl) >= min_size
+        ]
+
+        # Limit to largest N if requested
+        if max_components is not None:
+            labels_filtered = labels_filtered[:max_components]
+
+        # Rebuild binary mask
+        if not labels_filtered:
+            # Nothing to keep
+            out = sitk.Image(mask_img.GetSize(), sitk.sitkUInt8)
+            out.CopyInformation(mask_img)
+            return out
+
+        # Start from empty image
+        out = sitk.Image(mask_img.GetSize(), sitk.sitkUInt8)
+        out.CopyInformation(mask_img)
+
+        for lbl in labels_filtered:
+            out = out | (cc == lbl)
+
+        return out
 
     def execute(self, image: sitk.Image,
                 params: pymia_fltr.FilterParams = None) -> sitk.Image:
-        """Applies simple post-processing on a multi-label segmentation.
+        """Applies post-processing on a multi-label segmentation.
 
-        Strategy:
-            1) For each label (1–5):
-                * take its binary mask
-                * run connected component analysis
-                * keep all components with at least `min_size` voxels
-            2) For Hippocampus (3) and Amygdala (4):
-                * apply neighborhood-based relabeling to fill small gaps
-            Background (0) is left implicit.
-
-        Args:
-            image (sitk.Image): The predicted label image.
-            params (FilterParams): Unused.
-
-        Returns:
-            sitk.Image: The post-processed label image.
+        Steps:
+            1) For labels 1,2,5: remove tiny components (min_size_large).
+            2) For hippo (3) & amygdala (4):
+                - keep only components >= min_size_small
+                - keep at most 2 largest blobs (left/right)
+                - apply small morphological closing.
         """
-
-        # Convert to numpy
-        seg_arr = sitk.GetArrayFromImage(image)  # shape (z, y, x)
+        # Convert to numpy for easier label-wise manipulation
+        seg_arr = sitk.GetArrayFromImage(image)   # shape (z, y, x)
         out_arr = np.zeros_like(seg_arr, dtype=seg_arr.dtype)
 
-        for label in [1, 2, 3, 4, 5]:
+        # Labels you have: 0 BG, 1 WM, 2 GM, 3 Hippo, 4 Amyg, 5 Thalamus
+        labels_all = [1, 2, 3, 4, 5]
 
+        for label in labels_all:
             mask = (seg_arr == label).astype(np.uint8)
             if mask.sum() == 0:
                 continue
 
             mask_img = sitk.GetImageFromArray(mask)
             mask_img.CopyInformation(image)
-            
-            cc = sitk.ConnectedComponent(mask_img)
 
-            stats = sitk.LabelShapeStatisticsImageFilter()
-            stats.Execute(cc)
+            # Choose parameters depending on label
+            if label in [self.hip_label, self.amyg_label]:
+                min_size = self.min_size_small
+                max_comp = self.max_components_small
+            else:
+                min_size = self.min_size_large
+                max_comp = None  # keep all "large enough" blobs
 
-            for comp_label in stats.GetLabels():
-                size = stats.GetNumberOfPixels(comp_label)
-                if size < self.min_size:
-                    continue
+            # Keep only relevant components
+            cleaned_mask = self._keep_components(mask_img,
+                                                 min_size=min_size,
+                                                 max_components=max_comp)
 
-                comp_cc = cc == comp_label
-                comp_arr = sitk.GetArrayFromImage(comp_cc) > 0
+            # For hippocampus & amygdala, apply a small closing to fill holes
+            if label in [self.hip_label, self.amyg_label]:
+                cleaned_mask = sitk.BinaryMorphologicalClosing(
+                    cleaned_mask,
+                    kernelRadius=(1, 1, 1)  # you can try (2,2,2) if needed
+                )
 
-                out_arr[comp_arr] = label
+            cleaned_arr = sitk.GetArrayFromImage(cleaned_mask) > 0
+            out_arr[cleaned_arr] = label
 
-        seg_clean = out_arr.copy()
-
-        seg_clean = self._majority_relabel(
-            seg_clean,
-            target_label=3,
-            threshold=self.nhood_threshold_hip
-        )
-
-        seg_clean = self._majority_relabel(
-            seg_clean,
-            target_label=4,
-            threshold=self.nhood_threshold_amyg
-        )
-
-        out_img = sitk.GetImageFromArray(seg_clean)
+        # Convert back to Sitk
+        out_img = sitk.GetImageFromArray(out_arr)
         out_img.CopyInformation(image)
         return out_img
 
     def __str__(self):
-        """Gets a printable string representation.
-
-        Returns:
-            str: String representation.
-        """
         return 'ImagePostProcessing:\n'.format(self=self)
 
 
